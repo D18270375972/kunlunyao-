@@ -1,0 +1,874 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>玉虚峰 · 昆仑谣</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #F0E4CE; }
+    canvas { display: block; cursor: crosshair; width: 100%; height: 100%; }
+    /* NPC 对话提示 */
+    .npc-dialog-hint {
+      position: absolute; bottom: 14%; left: 50%; transform: translateX(-50%);
+      z-index: 20; pointer-events: none;
+      padding: 6px 18px; border-radius: 999px;
+      background: rgba(74,63,50,0.75); color: #E8CC8A;
+      font-size: 13px; letter-spacing: 0.18em;
+      border: 1px solid rgba(212,168,83,0.3);
+      backdrop-filter: blur(4px);
+      opacity: 0; animation: npcHintFade 6s ease-in-out 1.5s forwards;
+      font-family: "STKaiti", "KaiTi", "楷体", "FangSong", "仿宋", serif;
+    }
+    @keyframes npcHintFade {
+      0% { opacity: 0; transform: translateX(-50%) translateY(8px); }
+      15% { opacity: 1; transform: translateX(-50%) translateY(0); }
+      75% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+    .npc-click-zone {
+      position: absolute; z-index: 15; cursor: pointer;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(212,168,83,0.08) 0%, transparent 70%);
+      transition: background .3s;
+    }
+    .npc-click-zone:hover {
+      background: radial-gradient(circle, rgba(212,168,83,0.18) 0%, transparent 70%);
+    }
+    .npc-click-zone::after {
+      content: ''; position: absolute; inset: 10%; border-radius: 50%;
+      border: 1.5px dashed rgba(212,168,83,0.25);
+      animation: npcRing 3s ease-in-out infinite;
+    }
+    @keyframes npcRing {
+      0%,100% { transform: scale(1); opacity: 0.3; }
+      50% { transform: scale(1.1); opacity: 0.6; }
+    }
+  </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div class="npc-click-zone" id="npcZone" style="bottom:22%;right:28%;width:100px;height:130px;transform:translate(50%,0)"></div>
+<div class="npc-dialog-hint">👆 点击此处与姜子牙对话</div>
+<script>
+(function(){
+  // ======================== 配色体系 ========================
+  const PALETTE = {
+    parchment:  '#F0E4CE',
+    inkDark:    '#2B2417',
+    inkMid:     '#4A3F32',
+    inkLight:   '#6B5E4F',
+    snowWhite:  '#EDE8DE',
+    snowPeak:   '#F5F0EB',
+    ochre:      '#9B7653',
+    ochreLight: '#B8956E',
+    cyanGray:   '#8B9DA8',
+    cyanLight:  '#A8B8C0',
+    mistGray:   '#D4CEC3',
+    mistLight:  '#E2DDD5',
+    sunsetGold: '#CB7D52',
+    sunsetWarm: '#D49060',
+    ridgeLine:  '#3A3024',
+  };
+
+  // ======================== 昆仑山体层级定义 ========================
+  const MOUNTAIN_LAYERS = [
+    {
+      name: '远山·层四', baseY: 0.36,
+      waves: [
+        { amp: 65, freq: 2.5, phase: 0.3 },
+        { amp: 28, freq: 4.8, phase: 1.1 },
+        { amp: 14, freq: 7.2, phase: 2.5 },
+        { amp: 8,  freq: 10.5, phase: 0.9 },
+      ],
+      bodyColor: PALETTE.cyanGray, ridgeColor: PALETTE.inkLight, snowColor: PALETTE.snowWhite,
+      opacity: 0.28, parallax: 8, lineWidth: 0.8, snowHeight: 35, ridgeDetail: 0,
+    },
+    {
+      name: '中景·层三', baseY: 0.50,
+      waves: [
+        { amp: 95, freq: 1.9, phase: 1.7 },
+        { amp: 42, freq: 4.2, phase: 0.2 },
+        { amp: 20, freq: 6.5, phase: 2.0 },
+        { amp: 10, freq: 9.0, phase: 1.3 },
+      ],
+      bodyColor: PALETTE.cyanLight, ridgeColor: PALETTE.inkMid, snowColor: PALETTE.snowPeak,
+      opacity: 0.45, parallax: 14, lineWidth: 1.0, snowHeight: 50, ridgeDetail: 0,
+    },
+    {
+      name: '近景·层二', baseY: 0.63,
+      waves: [
+        { amp: 130, freq: 1.45, phase: 0.9 },
+        { amp: 55, freq: 3.3, phase: 1.5 },
+        { amp: 25, freq: 5.5, phase: 0.4 },
+        { amp: 12, freq: 8.0, phase: 2.1 },
+      ],
+      bodyColor: PALETTE.ochre, ridgeColor: PALETTE.inkDark, snowColor: PALETTE.snowWhite,
+      opacity: 0.65, parallax: 22, lineWidth: 1.3, snowHeight: 65, ridgeDetail: 0,
+    },
+    {
+      name: '前景·层一', baseY: 0.77,
+      waves: [
+        { amp: 170, freq: 0.92, phase: 2.3 },
+        { amp: 65,  freq: 2.4, phase: 0.6 },
+        { amp: 30,  freq: 4.2, phase: 1.8 },
+        { amp: 12,  freq: 6.8, phase: 0.3 },
+      ],
+      bodyColor: PALETTE.inkDark, ridgeColor: PALETTE.inkDark, snowColor: PALETTE.snowPeak,
+      opacity: 0.38, parallax: 32, lineWidth: 1.6, snowHeight: 70, ridgeDetail: 0,
+    },
+  ];
+
+  const SNOW_COUNT = 120;
+  const TRAIL_MAX = 120;
+  const TRAIL_LIFETIME = 2.0;
+  const RIPPLE_LIFETIME = 2.8;
+
+  // ======================== 音乐律动系统 ========================
+  var _musicBeat = 0;       // 当前节拍强度 (0~1, 衰减)
+  var _musicFreq = 261.63;  // 当前音符频率
+  var _musicNoteIdx = 0;    // 当前音符索引
+
+  // 监听父页面音乐节拍
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'musicBeat') {
+      _musicBeat = 1.0;  // 满强度
+      _musicFreq = e.data.frequency || 261.63;
+      _musicNoteIdx = e.data.noteIndex || 0;
+    }
+  });
+
+  // 将频率映射为归一化值 (0~1, 对应宫商角徵羽)
+  function _noteNorm() {
+    // PENTA: 261.63, 293.66, 329.63, 392.00, 440.00
+    var freqs = [261.63, 293.66, 329.63, 392.00, 440.00];
+    return _musicNoteIdx / (freqs.length - 1);
+  }
+
+  // ======================== 工具函数 ========================
+  function hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1,3),16);
+    const g = parseInt(hex.slice(3,5),16);
+    const b = parseInt(hex.slice(5,7),16);
+    return 'rgba('+r+','+g+','+b+','+alpha+')';
+  }
+
+  function shadeColor(hex, amt) {
+    let r = parseInt(hex.slice(1,3),16);
+    let g = parseInt(hex.slice(3,5),16);
+    let b = parseInt(hex.slice(5,7),16);
+    r = Math.min(255, Math.max(0, r+amt));
+    g = Math.min(255, Math.max(0, g+amt));
+    b = Math.min(255, Math.max(0, b+amt));
+    return 'rgb('+r+','+g+','+b+')';
+  }
+
+  // 生成羊皮纸纹理
+  function generateParchment(w, h, dpr) {
+    const pw = Math.ceil(w * dpr);
+    const ph = Math.ceil(h * dpr);
+    const oc = document.createElement('canvas');
+    oc.width = pw; oc.height = ph;
+    const octx = oc.getContext('2d');
+    octx.fillStyle = PALETTE.parchment;
+    octx.fillRect(0, 0, pw, ph);
+    const step = 3;
+    const nw = Math.ceil(pw / step);
+    const nh = Math.ceil(ph / step);
+    const imgData = octx.createImageData(nw, nh);
+    const d = imgData.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const n = (Math.random() - 0.5) * 14;
+      d[i] = 240 + n; d[i+1] = 228 + n; d[i+2] = 206 + n; d[i+3] = 255;
+    }
+    const tmp = document.createElement('canvas');
+    tmp.width = nw; tmp.height = nh;
+    tmp.getContext('2d').putImageData(imgData, 0, 0);
+    octx.imageSmoothingEnabled = false;
+    octx.drawImage(tmp, 0, 0, pw, ph);
+    octx.globalAlpha = 0.03;
+    for (let i = 0; i < 200; i++) {
+      const y = Math.random() * ph;
+      octx.fillStyle = '#8B6B4A';
+      octx.fillRect(0, y, pw, 1 + Math.random() * 2);
+    }
+    octx.globalAlpha = 1;
+    return oc;
+  }
+
+  // 计算山脊 Y 坐标
+  function getMountainY(x, w, layer, timeOffset) {
+    const t = x / w;
+    let y = 0;
+    for (let i = 0; i < layer.waves.length; i++) {
+      const wave = layer.waves[i];
+      y += wave.amp * Math.sin(t * wave.freq * Math.PI * 2 + wave.phase + timeOffset);
+    }
+    return y;
+  }
+
+  // 绘制单层山体（山体位置完全固定，不随呼吸/节拍跳动）
+  function drawMountainLayer(ctx, w, h, layer, offsetX, breathY, timeOffset, beatPulse) {
+    const baseY = layer.baseY * h;
+    const points = [];
+    for (let x = 0; x <= w; x += 2) {
+      const ry = baseY + getMountainY(x, w, layer, timeOffset);
+      points.push({ x: x + offsetX, y: ry });
+    }
+
+    // 山体填充
+    ctx.save();
+    ctx.globalAlpha = layer.opacity;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+    ctx.lineTo(points[points.length-1].x, h);
+    ctx.lineTo(points[0].x, h);
+    ctx.closePath();
+    const bodyGrad = ctx.createLinearGradient(0, baseY - 100, 0, h);
+    bodyGrad.addColorStop(0, layer.bodyColor);
+    bodyGrad.addColorStop(0.35, layer.bodyColor);
+    bodyGrad.addColorStop(1, shadeColor(layer.bodyColor, -30));
+    ctx.fillStyle = bodyGrad;
+    ctx.fill();
+
+    // 侧光渐变
+    ctx.globalCompositeOperation = 'source-atop';
+    const sideGrad = ctx.createLinearGradient(w * 0.3, 0, w, 0);
+    sideGrad.addColorStop(0, 'rgba(0,0,0,0.08)');
+    sideGrad.addColorStop(0.5, 'rgba(0,0,0,0)');
+    sideGrad.addColorStop(1, 'rgba(255,200,150,0.06)');
+    ctx.fillStyle = sideGrad;
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+
+    // 雪顶
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+    ctx.closePath();
+    ctx.clip();
+    const snowGrad = ctx.createLinearGradient(0, baseY - 30, 0, baseY + layer.snowHeight);
+    snowGrad.addColorStop(0, hexToRgba(layer.snowColor, 0.92));
+    snowGrad.addColorStop(0.5, hexToRgba(layer.snowColor, 0.4));
+    snowGrad.addColorStop(1, hexToRgba(layer.snowColor, 0));
+    ctx.fillStyle = snowGrad;
+    ctx.fillRect(0, 0, w, baseY + layer.snowHeight);
+    ctx.restore();
+    ctx.restore();
+
+    // 山脊铁线描
+    ctx.save();
+    ctx.globalAlpha = layer.opacity * 1.1;
+    ctx.strokeStyle = layer.ridgeColor;
+    ctx.lineWidth = layer.lineWidth;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+    ctx.stroke();
+    ctx.restore();
+
+    // 山脊高光
+    ctx.save();
+    ctx.globalAlpha = layer.opacity * 0.18;
+    ctx.strokeStyle = hexToRgba(layer.snowColor, 1);
+    ctx.lineWidth = layer.lineWidth * 0.6;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y - 1.5);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y - 1.5);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 绘制云雾
+  function drawMist(ctx, w, h, yPos, breathY, beatPulse) {
+    const y = yPos * h;
+    ctx.save();
+    const mistGrad = ctx.createLinearGradient(0, y - 40, 0, y + 40);
+    mistGrad.addColorStop(0, 'rgba(212, 206, 195, 0)');
+    mistGrad.addColorStop(0.5, 'rgba(226, 221, 213, 0.25)');
+    mistGrad.addColorStop(1, 'rgba(212, 206, 195, 0)');
+    ctx.fillStyle = mistGrad;
+    ctx.fillRect(0, y - 40, w, 80);
+    ctx.restore();
+  }
+
+  // 天空落日余晖
+  function drawSkyGlow(ctx, w, h, time, beatPulse) {
+    const glowX = w * 0.68 + Math.sin(time * 0.0001) * 30;
+    const glowY = h * 0.18;
+    const glowR = Math.min(w, h) * 0.55;
+    ctx.save();
+    var glowAlpha = 0.07;
+    const grad = ctx.createRadialGradient(glowX, glowY, 0, glowX, glowY, glowR);
+    grad.addColorStop(0, 'rgba(203, 125, 82, ' + glowAlpha + ')');
+    grad.addColorStop(0.4, 'rgba(203, 125, 82, ' + (glowAlpha*0.43) + ')');
+    grad.addColorStop(0.7, 'rgba(212, 144, 96, ' + (glowAlpha*0.14) + ')');
+    grad.addColorStop(1, 'rgba(203, 125, 82, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+
+  // 绘制霜雪粒子
+  function drawSnowParticles(ctx, particles, w, h, breathY, beatPulse) {
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const twinkle = Math.sin(p.twinklePhase) * 0.4 + 0.6;
+      const alpha = Math.min(1, p.baseAlpha * twinkle);
+      ctx.fillStyle = 'rgba(245, 240, 235, ' + alpha + ')';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // 绘制毛笔拖尾
+  function drawTrails(ctx, trailPoints) {
+    const now = performance.now() / 1000;
+    for (let i = 0; i < trailPoints.length; i++) {
+      const p = trailPoints[i];
+      const age = now - p.birth;
+      if (age > TRAIL_LIFETIME) continue;
+      const lifeFrac = 1 - age / TRAIL_LIFETIME;
+      const alpha = p.baseAlpha * lifeFrac * lifeFrac;
+      ctx.fillStyle = 'rgba(210, 200, 185, ' + alpha + ')';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * (0.7 + lifeFrac * 0.3), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // 绘制墨韵涟漪（单层，轻柔）
+  function drawRipples(ctx, ripples) {
+    const now = performance.now() / 1000;
+    for (let i = 0; i < ripples.length; i++) {
+      const r = ripples[i];
+      const age = now - r.birth;
+      if (age > RIPPLE_LIFETIME) continue;
+      const progress = age / RIPPLE_LIFETIME;
+      const ease = 1 - Math.pow(1 - progress, 3);
+      const alpha = 0.4 * (1 - progress);
+      const radius = r.maxRadius * ease;
+
+      ctx.strokeStyle = r.color.replace('1)', alpha + ')');
+      ctx.lineWidth = 1.5 * (1 - progress * 0.6);
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  // ★ 绘制Q版姜子牙（可爱风格·无道具）
+  function drawJiangZiya(ctx, w, h, time, parallaxX) {
+    var nx = w * 0.62 + parallaxX * 18;
+    var ny = h * 0.76;
+    var scale = Math.min(w, h) / 450;
+    scale = Math.max(0.8, Math.min(1.6, scale));
+
+    ctx.save();
+    ctx.translate(nx, ny);
+    ctx.scale(scale, scale);
+
+    var breath = Math.sin(time * 0.002) * 1;
+
+    // ── 仙气光晕 ──
+    ctx.save();
+    var glowAlpha = 0.03 + Math.sin(time * 0.003) * 0.015;
+    ctx.globalAlpha = glowAlpha;
+    var glowG = ctx.createRadialGradient(0, -20, 20, 0, -20, 90);
+    glowG.addColorStop(0, 'rgba(212,168,83,0.6)');
+    glowG.addColorStop(1, 'rgba(212,168,83,0)');
+    ctx.fillStyle = glowG;
+    ctx.beginPath(); ctx.arc(0, -20, 90, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+
+    // ── 下身道袍外摆 ──
+    ctx.globalAlpha = 0.32;
+    ctx.fillStyle = '#4A3F32';
+    ctx.beginPath();
+    ctx.moveTo(-22, 0);
+    ctx.quadraticCurveTo(-28, 28, -32, 62 + breath);
+    ctx.quadraticCurveTo(-16, 68 + breath, 0, 66 + breath);
+    ctx.quadraticCurveTo(16, 68 + breath, 32, 62 + breath);
+    ctx.quadraticCurveTo(28, 28, 22, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // 道袍衣褶
+    ctx.globalAlpha = 0.18;
+    ctx.strokeStyle = '#3A3028';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(-14, 5); ctx.quadraticCurveTo(-16, 35, -18, 60 + breath); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(14, 5); ctx.quadraticCurveTo(16, 35, 18, 60 + breath); ctx.stroke();
+
+    // ── 上身宽袍 ──
+    ctx.globalAlpha = 0.38;
+    ctx.fillStyle = '#4A3F32';
+    ctx.beginPath();
+    ctx.moveTo(-24, -42);
+    ctx.quadraticCurveTo(-38, -22, -34, -4);
+    ctx.quadraticCurveTo(-30, 4, -22, -4);
+    ctx.lineTo(22, -4);
+    ctx.quadraticCurveTo(30, 4, 34, -4);
+    ctx.quadraticCurveTo(38, -22, 24, -42);
+    ctx.closePath();
+    ctx.fill();
+
+    // 衣领交领
+    ctx.globalAlpha = 0.28;
+    ctx.strokeStyle = '#D4A853';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-12, -36); ctx.lineTo(0, -14); ctx.lineTo(12, -36); ctx.stroke();
+
+    // ── 腰带 ──
+    ctx.globalAlpha = 0.50;
+    ctx.fillStyle = '#D4A853';
+    ctx.fillRect(-24, -12, 48, 5);
+    // 腰带扣
+    ctx.globalAlpha = 0.40;
+    ctx.beginPath(); ctx.arc(0, -9.5, 3.5, 0, Math.PI * 2); ctx.stroke();
+
+    // ── 手臂 ──
+    ctx.globalAlpha = 0.32;
+    ctx.fillStyle = '#4A3F32';
+    ctx.beginPath();
+    ctx.moveTo(-22, -36); ctx.quadraticCurveTo(-32, -22, -28, -4);
+    ctx.lineTo(-20, -4); ctx.quadraticCurveTo(-24, -20, -16, -34); ctx.closePath(); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(22, -36); ctx.quadraticCurveTo(32, -22, 28, -4);
+    ctx.lineTo(20, -4); ctx.quadraticCurveTo(24, -20, 16, -34); ctx.closePath(); ctx.fill();
+
+    // ── 小手 ──
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#F0D8B0';
+    ctx.beginPath(); ctx.ellipse(-28, -2, 4.5, 5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(28, -2, 4.5, 5, 0, 0, Math.PI * 2); ctx.fill();
+
+    // ── 玉佩 ──
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = '#6FB896';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.arc(0, 2, 3.5, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#6FB896';
+    ctx.globalAlpha = 0.30;
+    ctx.beginPath(); ctx.arc(0, 2, 1.3, 0, Math.PI * 2); ctx.fill();
+
+    // ── 脸部 (大头圆脸) ──
+    ctx.globalAlpha = 0.92;
+    ctx.fillStyle = '#F0D8B0';
+    ctx.beginPath(); ctx.ellipse(0, -52, 15, 16, 0, 0, Math.PI * 2); ctx.fill();
+
+    // ── 白发 ──
+    ctx.globalAlpha = 0.88;
+    ctx.fillStyle = '#F5F0E8';
+    ctx.beginPath();
+    ctx.moveTo(-15, -60); ctx.quadraticCurveTo(-20, -76, -12, -86);
+    ctx.quadraticCurveTo(0, -92, 12, -86); ctx.quadraticCurveTo(20, -76, 15, -60);
+    ctx.closePath(); ctx.fill();
+
+    // 两侧垂发
+    ctx.globalAlpha = 0.70;
+    ctx.strokeStyle = '#F5F0E8';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(-16, -68); ctx.quadraticCurveTo(-22, -52, -18, -38); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(16, -68); ctx.quadraticCurveTo(22, -52, 18, -38); ctx.stroke();
+
+    // ── 发髻 ──
+    ctx.globalAlpha = 0.88;
+    ctx.fillStyle = '#F5F0E8';
+    ctx.beginPath(); ctx.arc(0, -90, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#D4A853';
+    ctx.globalAlpha = 0.75;
+    ctx.beginPath(); ctx.arc(0, -90, 2, 0, Math.PI * 2); ctx.fill();
+
+    // ── 道冠 ──
+    ctx.globalAlpha = 0.80;
+    ctx.fillStyle = '#4A3A30';
+    ctx.beginPath();
+    ctx.moveTo(-11, -72); ctx.lineTo(0, -98); ctx.lineTo(11, -72); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, -72, 13, 3.5, 0, 0, Math.PI * 2); ctx.fill();
+    // 冠上金饰
+    ctx.fillStyle = '#D4A853';
+    ctx.globalAlpha = 0.65;
+    ctx.beginPath(); ctx.arc(0, -96, 1.8, 0, Math.PI * 2); ctx.fill();
+
+    // ── 大眼睛 ──
+    ctx.globalAlpha = 0.90;
+    ctx.fillStyle = '#2A1A08';
+    ctx.beginPath(); ctx.arc(-5.5, -54, 3.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(5.5, -54, 3.5, 0, Math.PI * 2); ctx.fill();
+
+    // 眼睛高光
+    ctx.fillStyle = '#FFF';
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath(); ctx.arc(-4, -56, 1.3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(7, -56, 1.3, 0, Math.PI * 2); ctx.fill();
+
+    // ── 眉毛 ──
+    ctx.strokeStyle = '#D4C8A0';
+    ctx.lineWidth = 1;
+    ctx.lineCap = 'round';
+    ctx.globalAlpha = 0.55;
+    ctx.beginPath(); ctx.moveTo(-9, -62); ctx.quadraticCurveTo(-6, -64, -3, -62); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(3, -62); ctx.quadraticCurveTo(6, -64, 9, -62); ctx.stroke();
+
+    // ── 小八字胡 ──
+    ctx.strokeStyle = '#E8E0D0';
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = 'round';
+    ctx.globalAlpha = 0.75;
+    ctx.beginPath(); ctx.moveTo(0, -44); ctx.quadraticCurveTo(-4, -36, -8, -32); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -44); ctx.quadraticCurveTo(4, -36, 8, -32); ctx.stroke();
+
+    // ── 嘴巴 (微笑) ──
+    ctx.strokeStyle = '#C4706A';
+    ctx.lineWidth = 1;
+    ctx.lineCap = 'round';
+    ctx.globalAlpha = 0.65;
+    ctx.beginPath(); ctx.moveTo(-4, -48); ctx.quadraticCurveTo(0, -45, 4, -48); ctx.stroke();
+
+    // ── 腮红 ──
+    ctx.fillStyle = '#E88A9A';
+    ctx.globalAlpha = 0.16;
+    ctx.beginPath(); ctx.ellipse(-10, -50, 3.5, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(10, -50, 3.5, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+
+    // ── 飘带/衣袂 ──
+    var flutter = Math.sin(time * 0.015) * 5;
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = '#4A3F32';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-30, -2); ctx.quadraticCurveTo(-38 + flutter, 12, -42 + flutter * 1.2, 8); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(28, -4); ctx.quadraticCurveTo(36 - flutter * 0.5, 10, 40 - flutter, 6); ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // ★ 绘制人物上方薄雾笼罩层（半透明覆盖姜子牙，营造仙雾中若隐若现效果）
+  function drawMistOverFigure(ctx, w, h, time) {
+    var y0 = h * 0.62;
+    var drift = Math.sin(time * 0.001) * 25;
+    ctx.save();
+    // 横向薄雾带（覆盖人物上半身）
+    var mistG = ctx.createLinearGradient(0, y0 - 20, 0, y0 + 50);
+    mistG.addColorStop(0, 'rgba(226,221,213,0)');
+    mistG.addColorStop(0.3, 'rgba(226,221,213,0.08)');
+    mistG.addColorStop(0.6, 'rgba(226,221,213,0.12)');
+    mistG.addColorStop(1, 'rgba(212,206,195,0)');
+    ctx.fillStyle = mistG;
+    ctx.fillRect(0, y0 - 20, w, 70);
+
+    // 几团飘过的雾气（覆盖在人物上方）
+    ctx.globalAlpha = 0.09;
+    ctx.fillStyle = PALETTE.mistLight;
+    ctx.beginPath();
+    ctx.ellipse(w * 0.55 + drift, y0 + 8, 160, 24, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(w * 0.72 - drift * 0.5, y0 + 3, 120, 18, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(w * 0.40 + drift * 0.4, y0 + 15, 100, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // ★ 绘制溪水
+  function drawStream(ctx, w, h, time, parallaxX) {
+    var baseY = h * 0.80;
+    var offX = parallaxX * 14;
+
+    ctx.save();
+
+    // 溪水主体 — 从左侧蜿蜒至右下
+    ctx.globalAlpha = 0.14;
+    var streamGrad = ctx.createLinearGradient(0, baseY - 10, 0, baseY + 30);
+    streamGrad.addColorStop(0, 'rgba(139,157,168,0)');
+    streamGrad.addColorStop(0.3, 'rgba(155,172,182,0.25)');
+    streamGrad.addColorStop(0.7, 'rgba(139,157,168,0.20)');
+    streamGrad.addColorStop(1, 'rgba(139,157,168,0)');
+    ctx.fillStyle = streamGrad;
+    ctx.beginPath();
+    ctx.moveTo(-20 + offX, baseY);
+    ctx.quadraticCurveTo(w * 0.2 + offX, baseY - 12, w * 0.4 + offX, baseY + 2);
+    ctx.quadraticCurveTo(w * 0.55 + offX, baseY + 14, w * 0.72 + offX, baseY + 5);
+    ctx.quadraticCurveTo(w * 0.85 + offX, baseY - 2, w + 20 + offX, baseY + 8);
+    ctx.lineTo(w + 20 + offX, baseY + 28);
+    ctx.quadraticCurveTo(w * 0.85 + offX, baseY + 18, w * 0.72 + offX, baseY + 22);
+    ctx.quadraticCurveTo(w * 0.55 + offX, baseY + 30, w * 0.4 + offX, baseY + 20);
+    ctx.quadraticCurveTo(w * 0.2 + offX, baseY + 8, -20 + offX, baseY + 18);
+    ctx.closePath();
+    ctx.fill();
+
+    // 水面波纹线
+    ctx.globalAlpha = 0.12;
+    ctx.strokeStyle = '#8B9DA8';
+    ctx.lineWidth = 0.8;
+    ctx.lineCap = 'round';
+    for (var i = 0; i < 3; i++) {
+      var yOff = baseY + 3 + i * 6;
+      var drift = Math.sin(time * 0.003 + i * 1.5) * 8;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.15 + offX + drift, yOff);
+      ctx.quadraticCurveTo(w * 0.35 + offX + drift, yOff - 3 + Math.sin(time*0.005+i)*2, w * 0.55 + offX + drift, yOff + 1);
+      ctx.quadraticCurveTo(w * 0.7 + offX + drift, yOff + 4 + Math.sin(time*0.004+i)*2, w * 0.85 + offX + drift, yOff);
+      ctx.stroke();
+    }
+
+    // 水面高光
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = '#E8E4DC';
+    var hlDrift = Math.sin(time * 0.002) * 15;
+    ctx.beginPath();
+    ctx.ellipse(w * 0.5 + offX + hlDrift, baseY + 5, 50, 3, -0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(w * 0.72 + offX - hlDrift * 0.5, baseY + 8, 35, 2.5, 0.15, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // ★ 绘制底部薄雾（衬托人物层）
+  function drawGroundMist(ctx, w, h, time) {
+    var y0 = h * 0.68;
+    ctx.save();
+    // 横向薄雾带
+    var mistG = ctx.createLinearGradient(0, y0 - 30, 0, y0 + 60);
+    mistG.addColorStop(0, 'rgba(212,206,195,0)');
+    mistG.addColorStop(0.3, 'rgba(226,221,213,0.12)');
+    mistG.addColorStop(0.7, 'rgba(226,221,213,0.18)');
+    mistG.addColorStop(1, 'rgba(212,206,195,0)');
+    ctx.fillStyle = mistG;
+    ctx.fillRect(0, y0 - 30, w, 90);
+
+    // 几团漂浮的雾气
+    var drift = Math.sin(time * 0.0015) * 20;
+    ctx.globalAlpha = 0.10;
+    ctx.fillStyle = PALETTE.mistLight;
+    ctx.beginPath();
+    ctx.ellipse(w * 0.3 + drift, y0 + 10, 120, 20, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(w * 0.7 - drift * 0.6, y0 + 5, 140, 22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(w * 0.5 + drift * 0.3, y0 + 18, 100, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // ★ 绘制音乐律动光晕
+  function drawMusicAura(ctx, w, h, beatPulse, noteNorm) {
+    if (beatPulse < 0.05) return;
+    ctx.save();
+    // 宫(0)=暖金, 商(0.25)=淡蓝, 角(0.5)=翠绿, 徵(0.75)=朱红, 羽(1)=靛紫
+    var colors = [
+      [212,168,83], [168,184,192], [107,163,128], [196,80,62], [74,80,138]
+    ];
+    var ci = Math.floor(noteNorm * 4.99);
+    ci = Math.min(4, Math.max(0, ci));
+    var c = colors[ci];
+    var alpha = beatPulse * 0.08;
+    var cx = w * 0.5 + Math.sin(noteNorm * Math.PI * 2) * w * 0.15;
+    var cy = h * 0.35;
+    var grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, w * 0.35);
+    grad.addColorStop(0, 'rgba('+c[0]+','+c[1]+','+c[2]+','+alpha+')');
+    grad.addColorStop(0.5, 'rgba('+c[0]+','+c[1]+','+c[2]+','+(alpha*0.3)+')');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+
+  // ======================== 初始化 ========================
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  let W = 0, H = 0, dpr = 1;
+  let parchment = null;
+  let snowParticles = [];
+  let trailPoints = [];
+  let ripples = [];
+  let time = 0;
+  let smoothMX = 0, smoothMY = 0, targetMX = 0, targetMY = 0;
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    W = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+    H = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    parchment = generateParchment(W, H, dpr);
+    initSnow();
+    targetMX = W / 2; targetMY = H / 2;
+    smoothMX = W / 2; smoothMY = H / 2;
+  }
+
+  function initSnow() {
+    snowParticles = [];
+    for (let i = 0; i < SNOW_COUNT; i++) {
+      snowParticles.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        size: 1.5 + Math.random() * 2.5,
+        baseAlpha: 0.25 + Math.random() * 0.4,
+        twinklePhase: Math.random() * Math.PI * 2,
+        twinkleSpeed: 0.008 + Math.random() * 0.025,
+        driftX: (Math.random() - 0.5) * 0.35,
+        driftY: 0.08 + Math.random() * 0.25,
+      });
+    }
+  }
+
+  resize();
+  window.addEventListener('resize', resize);
+
+  // 鼠标事件
+  canvas.addEventListener('mousemove', function(e) {
+    targetMX = e.clientX;
+    targetMY = e.clientY;
+    const count = 2 + Math.floor(Math.random() * 3);
+    for (let i = 0; i < count; i++) {
+      trailPoints.push({
+        x: e.clientX + (Math.random() - 0.5) * 10,
+        y: e.clientY + (Math.random() - 0.5) * 7,
+        size: 2.5 + Math.random() * 5,
+        baseAlpha: 0.25 + Math.random() * 0.3,
+        birth: performance.now() / 1000,
+      });
+    }
+    while (trailPoints.length > TRAIL_MAX) trailPoints.shift();
+  });
+
+  // NPC 点击区域触发对话
+  var npcZone = document.getElementById('npcZone');
+  if (npcZone) {
+    npcZone.addEventListener('click', function(e) {
+      e.stopPropagation();
+      try { parent.startDialog(); } catch(ex) {}
+    });
+  }
+
+  canvas.addEventListener('click', function(e) {
+    const colors = [
+      'rgba(139, 157, 168, 1)',
+      'rgba(237, 232, 222, 1)',
+      'rgba(155, 118, 83, 1)',
+      'rgba(212, 206, 195, 1)',
+    ];
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    ripples.push({
+      x: e.clientX,
+      y: e.clientY,
+      maxRadius: 100 + Math.random() * 120,
+      color: color,
+      birth: performance.now() / 1000,
+    });
+    if (e.clientY < H * 0.75) {
+      try { parent.startDialog(); } catch(ex) {}
+    }
+  });
+
+  // ======================== 动画循环 ========================
+  var _sceneInited = false;
+  function animate() {
+    if(W < 2 || H < 2){
+      if(window.innerWidth > 0 && window.innerHeight > 0) resize();
+      requestAnimationFrame(animate); return;
+    }
+    if(!_sceneInited){ _sceneInited = true; }
+    time++;
+
+    // ★ 音乐律动衰减
+    _musicBeat *= 0.92;
+    if (_musicBeat < 0.01) _musicBeat = 0;
+    var beatPulse = _musicBeat;
+
+    smoothMX += (targetMX - smoothMX) * 0.04;
+    smoothMY += (targetMY - smoothMY) * 0.04;
+
+    // 山体呼吸：极微小值，仅给云雾/粒子一丝微动
+    const breathY = Math.sin(time * 0.0035) * 1.5;
+    const timePhase = time * 0.0009;
+    const parallaxBaseX = (smoothMX / W - 0.5) * 2;
+    const parallaxBaseY = (smoothMY / H - 0.5) * 2;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // 1. 羊皮纸背景
+    if (parchment) {
+      ctx.drawImage(parchment, 0, 0, W, H);
+    } else {
+      ctx.fillStyle = PALETTE.parchment;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // 2. 天空落日余晖
+    drawSkyGlow(ctx, W, H, time, beatPulse);
+
+    // ★ 2.5 音乐律动光晕
+    drawMusicAura(ctx, W, H, beatPulse, _noteNorm());
+
+    // 3. 逐层绘制山体
+    for (let i = 0; i < MOUNTAIN_LAYERS.length; i++) {
+      const layer = MOUNTAIN_LAYERS[i];
+      const offX = parallaxBaseX * layer.parallax;
+      const offY = parallaxBaseY * layer.parallax * 0.25;
+      drawMountainLayer(ctx, W, H, layer, offX, offY, timePhase, 0);
+      if (i < MOUNTAIN_LAYERS.length - 1) {
+        const mistY = (layer.baseY + MOUNTAIN_LAYERS[i+1].baseY) / 2;
+        drawMist(ctx, W, H, mistY, breathY, 0);
+      }
+    }
+
+    // 3.5 底部薄雾 + 姜子牙 + 薄雾笼罩 + 溪水
+    drawGroundMist(ctx, W, H, time);
+    drawJiangZiya(ctx, W, H, time, parallaxBaseX);
+    drawMistOverFigure(ctx, W, H, time);
+    drawStream(ctx, W, H, time, parallaxBaseX);
+
+    // 4. 霜雪粒子
+    for (let i = 0; i < snowParticles.length; i++) {
+      const p = snowParticles[i];
+      p.y += p.driftY;
+      p.x += p.driftX;
+      p.twinklePhase += p.twinkleSpeed;
+      if (p.y > H + 15) { p.y = -15; p.x = Math.random() * W; }
+      if (p.x < -15) p.x = W + 15;
+      if (p.x > W + 15) p.x = -15;
+    }
+    drawSnowParticles(ctx, snowParticles, W, H, breathY, beatPulse);
+
+    // 5. 毛笔拖尾
+    drawTrails(ctx, trailPoints);
+
+    // 6. 墨韵涟漪
+    drawRipples(ctx, ripples);
+
+    // 清理过期对象
+    const now = performance.now() / 1000;
+    trailPoints = trailPoints.filter(function(p) { return now - p.birth < TRAIL_LIFETIME; });
+    ripples = ripples.filter(function(r) { return now - r.birth < RIPPLE_LIFETIME; });
+
+    requestAnimationFrame(animate);
+  }
+
+  requestAnimationFrame(animate);
+})();
+</script>
+</body>
+</html>
