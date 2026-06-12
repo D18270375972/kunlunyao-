@@ -104,6 +104,195 @@
   const TRAIL_LIFETIME = 2.0;
   const RIPPLE_LIFETIME = 2.8;
 
+  // ======================== 飞鸟系统 ========================
+  var BIRDS = [];
+  function initBirds() {
+    BIRDS = [];
+    for (var i = 0; i < 5; i++) {
+      BIRDS.push({
+        x: Math.random() * W * 0.8 + W * 0.1,
+        y: H * (0.22 + Math.random() * 0.18),
+        speed: 0.15 + Math.random() * 0.35,
+        wingPhase: Math.random() * Math.PI * 2,
+        wingSpeed: 0.06 + Math.random() * 0.04,
+        size: 3 + Math.random() * 4,
+        parallax: 6 + Math.random() * 10,
+        driftY: (Math.random() - 0.5) * 0.08,
+      });
+    }
+  }
+  initBirds();
+
+  // 绘制单只飞鸟（简笔水墨风格）
+  function drawBird(ctx, bird, time, parallaxBaseX) {
+    var bx = bird.x + parallaxBaseX * bird.parallax;
+    var by = bird.y;
+    var wingAngle = Math.sin(bird.wingPhase) * 0.35;
+    var s = bird.size;
+
+    ctx.save();
+    ctx.globalAlpha = 0.50;
+    ctx.strokeStyle = PALETTE.inkMid;
+    ctx.lineWidth = Math.max(0.8, s * 0.2);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // 左翅
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.quadraticCurveTo(bx - s * 2.2, by - s * (1.2 + wingAngle * 3), bx - s * 4, by + s * wingAngle * 1.5);
+    ctx.stroke();
+
+    // 右翅
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.quadraticCurveTo(bx + s * 2.2, by - s * (1.2 + wingAngle * 3), bx + s * 4, by + s * wingAngle * 1.5);
+    ctx.stroke();
+
+    // 身体小点
+    ctx.globalAlpha = 0.40;
+    ctx.fillStyle = PALETTE.inkMid;
+    ctx.beginPath();
+    ctx.arc(bx, by, s * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // 绘制所有飞鸟并更新位置
+  function drawBirds(ctx, time, parallaxBaseX) {
+    for (var i = 0; i < BIRDS.length; i++) {
+      var b = BIRDS[i];
+      b.x += b.speed;
+      b.y += b.driftY + Math.sin(time * 0.002 + i * 2) * 0.04;
+      b.wingPhase += b.wingSpeed;
+      if (b.x > W + 60) {
+        b.x = -60;
+        b.y = H * (0.22 + Math.random() * 0.18);
+      }
+      drawBird(ctx, b, time, parallaxBaseX);
+    }
+  }
+
+  // ======================== 云朵系统 ========================
+  var CLOUDS = [];
+  function initClouds() {
+    CLOUDS = [];
+    var cloudDefs = [
+      { xRatio: 0.15, yRatio: 0.28, wRatio: 0.14, hRatio: 0.025, speed: 0.12, parallax: 6, opacity: 0.12 },
+      { xRatio: 0.45, yRatio: 0.22, wRatio: 0.18, hRatio: 0.030, speed: 0.08, parallax: 10, opacity: 0.10 },
+      { xRatio: 0.70, yRatio: 0.32, wRatio: 0.12, hRatio: 0.020, speed: 0.15, parallax: 5, opacity: 0.14 },
+      { xRatio: 0.85, yRatio: 0.26, wRatio: 0.16, hRatio: 0.028, speed: 0.10, parallax: 8, opacity: 0.11 },
+      { xRatio: 0.30, yRatio: 0.38, wRatio: 0.20, hRatio: 0.032, speed: 0.06, parallax: 14, opacity: 0.08 },
+    ];
+    for (var i = 0; i < cloudDefs.length; i++) {
+      var d = cloudDefs[i];
+      CLOUDS.push({
+        x: d.xRatio * W + (Math.random() - 0.5) * 40,
+        y: d.yRatio * H,
+        cw: d.wRatio * W,
+        ch: d.hRatio * H,
+        speed: d.speed,
+        parallax: d.parallax,
+        opacity: d.opacity,
+        driftPhase: Math.random() * Math.PI * 2,
+      });
+    }
+  }
+  initClouds();
+
+  // 绘制单朵云（水墨团云风格）
+  function drawCloud(ctx, cloud, time, parallaxBaseX) {
+    var cx = cloud.x + parallaxBaseX * cloud.parallax + Math.sin(time * 0.001 + cloud.driftPhase) * 15;
+    var cy = cloud.y + Math.sin(time * 0.0015 + cloud.driftPhase) * 3;
+    var cw = cloud.cw;
+    var ch = cloud.ch;
+
+    ctx.save();
+    ctx.globalAlpha = cloud.opacity;
+
+    // 云主体 — 多个椭圆叠加成团云
+    ctx.fillStyle = PALETTE.mistLight;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, cw * 0.45, ch * 1.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx - cw * 0.28, cy + ch * 0.2, cw * 0.30, ch * 0.85, -0.15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx + cw * 0.30, cy + ch * 0.15, cw * 0.28, ch * 0.80, 0.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx + cw * 0.08, cy - ch * 0.3, cw * 0.22, ch * 0.60, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 云底渐隐
+    ctx.globalAlpha = cloud.opacity * 0.5;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + ch * 0.5, cw * 0.35, ch * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  // 绘制所有云朵并更新
+  function drawAllClouds(ctx, time, parallaxBaseX) {
+    for (var i = 0; i < CLOUDS.length; i++) {
+      var c = CLOUDS[i];
+      c.x += c.speed;
+      if (c.x - c.cw / 2 > W + 40) {
+        c.x = -c.cw;
+        c.y = CLOUDS[i].y * (0.9 + Math.random() * 0.2);
+      }
+      drawCloud(ctx, c, time, parallaxBaseX);
+    }
+  }
+
+  // ======================== 日落圆盘 ========================
+  function drawSunDisk(ctx, w, h, time, parallaxBaseX) {
+    // 日落圆盘位于远山之上
+    var sunX = w * 0.68 + Math.sin(time * 0.00008) * 20 + parallaxBaseX * 3;
+    var sunY = h * 0.16 + Math.sin(time * 0.0001) * 8;
+    var sunR = Math.min(w, h) * 0.042;
+
+    ctx.save();
+
+    // 外层光晕（暖橙扩散）
+    ctx.globalAlpha = 0.12;
+    var halo1 = ctx.createRadialGradient(sunX, sunY, sunR * 0.5, sunX, sunY, sunR * 5);
+    halo1.addColorStop(0, 'rgba(212,144,96,0.3)');
+    halo1.addColorStop(0.3, 'rgba(203,125,82,0.12)');
+    halo1.addColorStop(1, 'rgba(203,125,82,0)');
+    ctx.fillStyle = halo1;
+    ctx.beginPath(); ctx.arc(sunX, sunY, sunR * 5, 0, Math.PI * 2); ctx.fill();
+
+    // 中层光晕（金橙）
+    ctx.globalAlpha = 0.18;
+    var halo2 = ctx.createRadialGradient(sunX, sunY, sunR * 0.3, sunX, sunY, sunR * 2.5);
+    halo2.addColorStop(0, 'rgba(232,180,120,0.35)');
+    halo2.addColorStop(0.5, 'rgba(212,168,83,0.15)');
+    halo2.addColorStop(1, 'rgba(203,125,82,0)');
+    ctx.fillStyle = halo2;
+    ctx.beginPath(); ctx.arc(sunX, sunY, sunR * 2.5, 0, Math.PI * 2); ctx.fill();
+
+    // 日轮（实心暖白偏橙圆盘）
+    ctx.globalAlpha = 0.55;
+    var diskGrad = ctx.createRadialGradient(sunX, sunY - sunR * 0.15, 0, sunX, sunY, sunR);
+    diskGrad.addColorStop(0, '#F5E8D5');
+    diskGrad.addColorStop(0.6, '#E8D0A8');
+    diskGrad.addColorStop(1, 'rgba(212,168,83,0.6)');
+    ctx.fillStyle = diskGrad;
+    ctx.beginPath(); ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2); ctx.fill();
+
+    // 日轮边缘光晕线
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = '#D4A853';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(sunX, sunY, sunR + 2, 0, Math.PI * 2); ctx.stroke();
+
+    ctx.restore();
+  }
+
   // ======================== 音乐律动系统 ========================
   var _musicBeat = 0;       // 当前节拍强度 (0~1, 衰减)
   var _musicFreq = 261.63;  // 当前音符频率
@@ -504,6 +693,8 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     parchment = generateParchment(W, H, dpr);
     initSnow();
+    initBirds();
+    initClouds();
     targetMX = W / 2; targetMY = H / 2;
     smoothMX = W / 2; smoothMY = H / 2;
   }
@@ -604,19 +795,30 @@
     // ★ 2.5 音乐律动光晕
     drawMusicAura(ctx, W, H, beatPulse, _noteNorm());
 
-    // 3. 逐层绘制山体
+    // ★ 2.7 日落圆盘
+    drawSunDisk(ctx, W, H, time, parallaxBaseX);
+
+    // 3. 逐层绘制山体（穿插云朵和飞鸟）
     for (let i = 0; i < MOUNTAIN_LAYERS.length; i++) {
       const layer = MOUNTAIN_LAYERS[i];
       const offX = parallaxBaseX * layer.parallax;
       const offY = parallaxBaseY * layer.parallax * 0.25;
       drawMountainLayer(ctx, W, H, layer, offX, offY, timePhase, 0);
+      // 远山(层四)之后绘制远景云朵
+      if (i === 0) {
+        drawAllClouds(ctx, time, parallaxBaseX);
+      }
+      // 中景(层三)之后绘制飞鸟（鸟在远山和中景之间飞翔）
+      if (i === 1) {
+        drawBirds(ctx, time, parallaxBaseX);
+      }
       if (i < MOUNTAIN_LAYERS.length - 1) {
         const mistY = (layer.baseY + MOUNTAIN_LAYERS[i+1].baseY) / 2;
         drawMist(ctx, W, H, mistY, breathY, 0);
       }
     }
 
-    // 3.5 底部薄雾 + 姜子牙 + 薄雾笼罩 + 溪水
+    // 3.5 底部薄雾 + 薄雾笼罩 + 溪水
     drawGroundMist(ctx, W, H, time);
     drawMistOverFigure(ctx, W, H, time);
     drawStream(ctx, W, H, time, parallaxBaseX);
